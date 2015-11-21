@@ -4,8 +4,11 @@
 # callbacks based async framework
 # * non blocking sockets 2°
 # * callbacks, allowing multiples operations to be waiting concurrently for i/o operations 3°
-# * event loop
-# * coroutines
+# * event loop 3°
+# * coroutines 4°
+# --> Future
+# --> generators
+# --> Task
 
 import socket
 import time
@@ -15,6 +18,17 @@ import time
 from selectors import DefaultSelector, EVENT_WRITE, EVENT_READ
 selector = DefaultSelector()
 n_tasks = 0
+
+
+# a Future represent some pending event we're waiting for
+class Future:
+    def __init__(self):
+        self.callbacks = [] # what to do when event occurs
+
+    def resolve(self):
+        for c in self.callbacks:
+            c()
+
 
 # client socket to retrieve something from a server
 def get(path):
@@ -32,8 +46,10 @@ def get(path):
 
     # we write a closure to pass s & request to our writable callback
     callback = lambda: writable(s, request)
+    f = Future()
+    f.callbacks.append(callback)
     # dear selector, I'm interested in any event that may occur on this file descriptor (my socket)
-    selector.register(s.fileno(), EVENT_WRITE, data=callback)
+    selector.register(s.fileno(), EVENT_WRITE, data=f)
 
 
 # 3° let's write a callback that will be called once the socket is writable
@@ -47,8 +63,10 @@ def writable(s, request):
 
     # we write a closure to pass s & chunks to our callback
     callback = lambda: readable(s, chunks)
+    f = Future()
+    f.callbacks.append(callback)
     # dear selector, I'm interested in any read event that may occur on this file descriptor
-    selector.register(s.fileno(), EVENT_READ, data=callback)
+    selector.register(s.fileno(), EVENT_READ, data=f)
 
 def readable(s, chunks):
     global n_tasks
@@ -59,8 +77,10 @@ def readable(s, chunks):
         chunks.append(chunk)
         # we need to ckeck if socket still readable, until the last chunk
         callback = lambda: readable(s, chunks)
+        f = Future()
+        f.callbacks.append(callback)
         # dear selector, I'm interested in any read event that may occur on this file descriptor
-        selector.register(s.fileno(), EVENT_READ, data=callback)
+        selector.register(s.fileno(), EVENT_READ, data=f)
     else: #empty chunk, server hang up
         body = b''.join(chunks).decode() # be-code
         print(body.split('\n')[0])
@@ -71,14 +91,19 @@ get('/?q=python+socket+&t=lm&ia=about')
 get('/?q=golang+socket+&t=lm&ia=about')
 get('/?q=rust+socket+&t=lm&ia=about')
 get('/?q=erlang+socket+&t=lm&ia=about')
+get('/?q=python+socket+&t=lm&ia=about')
+get('/?q=golang+socket+&t=lm&ia=about')
+get('/?q=rust+socket+&t=lm&ia=about')
+get('/?q=erlang+socket+&t=lm&ia=about')
+
 
 while n_tasks:
     # retrieve events
     events = selector.select()
     for event, mask in events:
-        cb = event.data
-        # whatever the event, call the callback linked to it
-        cb()
+        future = event.data # retrieve the future
+        # call the callbacks associated to the future
+        future.resolve()
 
 # get launched serially, so final time is time for one request times number of requests
 print("took %.1f sec" % (time.time() - start))
