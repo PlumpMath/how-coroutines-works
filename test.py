@@ -14,9 +14,13 @@ import time
 # jusk ask for the default selector for your system
 from selectors import DefaultSelector, EVENT_WRITE, EVENT_READ
 selector = DefaultSelector()
+n_tasks = 0
 
 # client socket to retrieve something from a server
 def get(path):
+    global n_tasks
+    n_tasks += 1
+
     s = socket.socket()
     s.setblocking(False) # socket no more blocking
     try:
@@ -47,6 +51,7 @@ def writable(s, request):
     selector.register(s.fileno(), EVENT_READ, data=callback)
 
 def readable(s, chunks):
+    global n_tasks
     # I'm no more interested in the read event on my socket, please forget about it
     selector.unregister(s.fileno())
     chunk = s.recv(1000)
@@ -59,7 +64,7 @@ def readable(s, chunks):
     else: #empty chunk, server hang up
         body = b''.join(chunks).decode() # be-code
         print(body.split('\n')[0])
-
+        n_tasks -= 1
 
 start = time.time()
 get('/?q=python+socket+&t=lm&ia=about')
@@ -67,7 +72,7 @@ get('/?q=golang+socket+&t=lm&ia=about')
 get('/?q=rust+socket+&t=lm&ia=about')
 get('/?q=erlang+socket+&t=lm&ia=about')
 
-while True:
+while n_tasks:
     # retrieve events
     events = selector.select()
     for event, mask in events:
